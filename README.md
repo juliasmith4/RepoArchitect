@@ -6,11 +6,11 @@ RepoArchitect is a full-stack software architecture analysis platform that helps
 
 - Python
 - FastAPI
-- React + TypeScript
+- React
+- TypeScript
 - PostgreSQL
 - SQLAlchemy
 - Alembic
-- Docker / Podman
+- Podman
 - Google Cloud Run
 - Gemini API
-- NetworkX
