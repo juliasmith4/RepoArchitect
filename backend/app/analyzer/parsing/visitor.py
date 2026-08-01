@@ -33,7 +33,7 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
         *arguments.args,
     ]
 
-    # Defaults only correspond to the final positional parameters.
+    # Python stores defaults only for the final positional parameters.
     default_offset = len(positional_arguments) - len(arguments.defaults)
 
     for index, argument in enumerate(positional_arguments):
@@ -51,7 +51,7 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # *args
+    # Collect *args.
     if arguments.vararg is not None:
         parameters.append(
             ParsedParameter(
@@ -63,7 +63,7 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # Keyword-only parameters
+    # Collect keyword-only parameters.
     for argument, default_node in zip(
         arguments.kwonlyargs,
         arguments.kw_defaults,
@@ -77,7 +77,7 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # **kwargs
+    # Collect **kwargs.
     if arguments.kwarg is not None:
         parameters.append(
             ParsedParameter(
@@ -100,7 +100,7 @@ class PythonAstVisitor(ast.NodeVisitor):
         self.functions: list[ParsedFunction] = []
         self.classes: list[ParsedClass] = []
 
-        # Holds classes that the visitor is currently inside.
+        # Holds the classes that the visitor is currently inside.
         self._class_stack: list[ParsedClass] = []
 
         # Prevents nested functions from being treated as top-level functions.
@@ -123,8 +123,13 @@ class PythonAstVisitor(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Collect from-import statements."""
 
-        # node.module can be None for certain relative imports.
+        # node.module can be None for relative imports such as:
+        # from . import models
         module = node.module or ""
+
+        # Preserve the leading dots for relative imports.
+        if node.level > 0:
+            module = f"{'.' * node.level}{module}"
 
         for imported_name in node.names:
             self.imports.append(
@@ -174,7 +179,9 @@ class PythonAstVisitor(ast.NodeVisitor):
             decorators=[
                 expression
                 for decorator in node.decorator_list
-                if (expression := expression_to_string(decorator)) is not None
+                if (
+                    expression := expression_to_string(decorator)
+                ) is not None
             ],
             docstring=ast.get_docstring(node),
             start_line=node.lineno,
@@ -185,9 +192,11 @@ class PythonAstVisitor(ast.NodeVisitor):
         self.classes.append(parsed_class)
         self._class_stack.append(parsed_class)
 
-        self.generic_visit(node)
+        try:
+            self.generic_visit(node)
+        finally:
+            self._class_stack.pop()
 
-        self._class_stack.pop()
     def _visit_function(
         self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -232,6 +241,8 @@ class PythonAstVisitor(ast.NodeVisitor):
                 self.functions.append(parsed_function)
 
         self._function_depth += 1
-        self.generic_visit(node)
-        self._function_depth -= 1
-        
+
+        try:
+            self.generic_visit(node)
+        finally:
+            self._function_depth -= 1
