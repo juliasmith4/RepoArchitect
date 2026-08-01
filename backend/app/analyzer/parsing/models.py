@@ -39,7 +39,12 @@ class ParsedAssignment:
     line_number: int
     is_instance_attribute: bool
 
+@dataclass
+class ParsedReturn:
+    """A return statement found inside a function or method."""
 
+    value: str | None
+    line_number: int
 @dataclass
 class ParsedFunction:
     """A parsed function or class method."""
@@ -56,7 +61,8 @@ class ParsedFunction:
     parent_class: str | None
     calls: list[ParsedCall] = field(default_factory=list)
     assignments: list[ParsedAssignment] = field(default_factory=list)
-
+    returns: list[ParsedReturn] = field(default_factory=list)
+    
 @dataclass
 class ParsedClass:
     """A parsed Python class."""

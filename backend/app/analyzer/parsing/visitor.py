@@ -9,6 +9,7 @@ from .models import (
     ParsedClass,
     ParsedFunction,
     ParsedParameter,
+    ParsedReturn,
 )
 
 
@@ -244,6 +245,19 @@ class PythonAstVisitor(ast.NodeVisitor):
 
         self.generic_visit(node)
 
+    def visit_Return(self, node: ast.Return) -> None:
+        """Collect a return statement inside the current function."""
+
+        if self._function_stack:
+            self._function_stack[-1].returns.append(
+                ParsedReturn(
+                    value=expression_to_string(node.value),
+                    line_number=node.lineno,
+                )
+            )
+
+        self.generic_visit(node)
+
     def visit_Assign(self, node: ast.Assign) -> None:
         """Collect a standard assignment inside the current function."""
 
@@ -328,6 +342,7 @@ class PythonAstVisitor(ast.NodeVisitor):
             parent_class=parent_class,
             calls=[],
             assignments=[],
+            returns=[],
         )
 
         if self._class_stack:
@@ -343,4 +358,3 @@ class PythonAstVisitor(ast.NodeVisitor):
         finally:
             self._function_stack.pop()
             self._function_depth -= 1
-            

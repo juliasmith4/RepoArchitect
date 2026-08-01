@@ -910,7 +910,127 @@ def configure(config):
 
     assert function.assignments == []
 
-    
+# ---------------------------------------------------------------------------
+# Return statements
+# ---------------------------------------------------------------------------
+
+
+def test_collects_variable_return() -> None:
+    visitor = create_visitor(
+        """
+def analyze():
+    result = create_result()
+    return result
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert len(function.returns) == 1
+    assert function.returns[0].value == "result"
+    assert function.returns[0].line_number == 4
+
+
+def test_collects_call_return() -> None:
+    visitor = create_visitor(
+        """
+def analyze(path):
+    return parse_repository(path)
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert function.returns[0].value == "parse_repository(path)"
+
+    assert [call.name for call in function.calls] == [
+        "parse_repository",
+    ]
+
+
+def test_collects_attribute_call_return() -> None:
+    visitor = create_visitor(
+        """
+class RepositoryAnalyzer:
+    def analyze(self, path):
+        return self.parser.parse(path)
+"""
+    )
+
+    method = visitor.classes[0].methods[0]
+
+    assert method.returns[0].value == "self.parser.parse(path)"
+
+    assert [call.name for call in method.calls] == [
+        "self.parser.parse",
+    ]
+
+
+def test_collects_bare_return() -> None:
+    visitor = create_visitor(
+        """
+def stop_processing():
+    return
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert len(function.returns) == 1
+    assert function.returns[0].value is None
+
+
+def test_collects_literal_return() -> None:
+    visitor = create_visitor(
+        """
+def get_status():
+    return {"status": "complete"}
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert function.returns[0].value == "{'status': 'complete'}"
+
+
+def test_collects_multiple_return_paths() -> None:
+    visitor = create_visitor(
+        """
+def validate(repository):
+    if repository.is_valid():
+        return True
+
+    return False
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert [parsed_return.value for parsed_return in function.returns] == [
+        "True",
+        "False",
+    ]
+
+
+def test_returns_do_not_leak_between_functions() -> None:
+    visitor = create_visitor(
+        """
+def first():
+    return "first"
+
+
+def second():
+    return "second"
+"""
+    )
+
+    assert [item.value for item in visitor.functions[0].returns] == [
+        "'first'",
+    ]
+
+    assert [item.value for item in visitor.functions[1].returns] == [
+        "'second'",
+    ]    
 # ---------------------------------------------------------------------------
 # Classes and methods
 # ---------------------------------------------------------------------------
