@@ -30,6 +30,15 @@ class ParsedCall:
     name: str
     line_number: int
 
+@dataclass
+class ParsedAssignment:
+    """An assignment found inside a function or method."""
+
+    target: str
+    value: str | None
+    line_number: int
+    is_instance_attribute: bool
+
 
 @dataclass
 class ParsedFunction:
@@ -46,7 +55,7 @@ class ParsedFunction:
     is_method: bool
     parent_class: str | None
     calls: list[ParsedCall] = field(default_factory=list)
-
+    assignments: list[ParsedAssignment] = field(default_factory=list)
 
 @dataclass
 class ParsedClass:
@@ -61,4 +70,3 @@ class ParsedClass:
     end_line: int | None
     parent_class: str | None
 
-    

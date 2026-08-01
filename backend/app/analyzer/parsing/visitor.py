@@ -4,6 +4,7 @@ import ast
 
 from .models import (
     ImportInfo,
+    ParsedAssignment,
     ParsedCall,
     ParsedClass,
     ParsedFunction,
@@ -51,13 +52,11 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
 
     parameters: list[ParsedParameter] = []
 
-    # Positional-only and regular positional arguments are handled together.
     positional_arguments = [
         *arguments.posonlyargs,
         *arguments.args,
     ]
 
-    # Positional defaults only apply to the final positional parameters.
     default_offset = len(positional_arguments) - len(arguments.defaults)
 
     for index, argument in enumerate(positional_arguments):
@@ -75,7 +74,6 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # *args
     if arguments.vararg is not None:
         parameters.append(
             ParsedParameter(
@@ -87,7 +85,6 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # Keyword-only parameters
     for argument, default_node in zip(
         arguments.kwonlyargs,
         arguments.kw_defaults,
@@ -101,7 +98,6 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # **kwargs
     if arguments.kwarg is not None:
         parameters.append(
             ParsedParameter(
@@ -116,6 +112,23 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
     return parameters
 
 
+def get_assignment_target_name(node: ast.AST) -> str | None:
+    """Convert an assignment target into a readable name."""
+
+    if isinstance(node, ast.Name):
+        return node.id
+
+    if isinstance(node, ast.Attribute):
+        parent_name = get_assignment_target_name(node.value)
+
+        if parent_name is None:
+            return node.attr
+
+        return f"{parent_name}.{node.attr}"
+
+    return None
+
+
 class PythonAstVisitor(ast.NodeVisitor):
     """Collect structured information from a Python AST."""
 
@@ -124,14 +137,8 @@ class PythonAstVisitor(ast.NodeVisitor):
         self.functions: list[ParsedFunction] = []
         self.classes: list[ParsedClass] = []
 
-        # Classes that the visitor is currently inside.
         self._class_stack: list[ParsedClass] = []
-
-        # Functions that the visitor is currently inside.
-        # This allows calls to be attached to the correct function.
         self._function_stack: list[ParsedFunction] = []
-
-        # Prevent nested functions from being stored as top-level functions.
         self._function_depth = 0
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -153,13 +160,6 @@ class PythonAstVisitor(ast.NodeVisitor):
 
         module = node.module or ""
 
-        # Preserve relative import dots.
-        #
-        # from .models import Item
-        # becomes module=".models"
-        #
-        # from ..services import Parser
-        # becomes module="..services"
         if node.level > 0:
             module = f"{'.' * node.level}{module}"
 
@@ -190,7 +190,6 @@ class PythonAstVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Collect a class and its directly defined methods."""
 
-        # Ignore classes declared inside functions for the first version.
         if self._function_depth > 0:
             return
 
@@ -243,7 +242,45 @@ class PythonAstVisitor(ast.NodeVisitor):
                     )
                 )
 
-        # Continue visiting arguments and nested calls.
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        """Collect a standard assignment inside the current function."""
+
+        if self._function_stack:
+            value = expression_to_string(node.value)
+
+            for target_node in node.targets:
+                target = get_assignment_target_name(target_node)
+
+                if target is not None:
+                    self._function_stack[-1].assignments.append(
+                        ParsedAssignment(
+                            target=target,
+                            value=value,
+                            line_number=node.lineno,
+                            is_instance_attribute=target.startswith("self."),
+                        )
+                    )
+
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        """Collect an annotated assignment inside the current function."""
+
+        if self._function_stack:
+            target = get_assignment_target_name(node.target)
+
+            if target is not None:
+                self._function_stack[-1].assignments.append(
+                    ParsedAssignment(
+                        target=target,
+                        value=expression_to_string(node.value),
+                        line_number=node.lineno,
+                        is_instance_attribute=target.startswith("self."),
+                    )
+                )
+
         self.generic_visit(node)
 
     def _visit_function(
@@ -256,8 +293,6 @@ class PythonAstVisitor(ast.NodeVisitor):
 
         is_nested_function = self._function_depth > 0
 
-        # Nested functions are traversed but are not stored as top-level
-        # functions or class methods in the current version.
         if is_nested_function:
             self._function_depth += 1
 
@@ -292,6 +327,7 @@ class PythonAstVisitor(ast.NodeVisitor):
             is_method=bool(self._class_stack),
             parent_class=parent_class,
             calls=[],
+            assignments=[],
         )
 
         if self._class_stack:
@@ -307,5 +343,4 @@ class PythonAstVisitor(ast.NodeVisitor):
         finally:
             self._function_stack.pop()
             self._function_depth -= 1
-
             

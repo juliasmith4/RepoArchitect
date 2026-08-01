@@ -690,7 +690,227 @@ def outer():
         "inner",
     ]
 
+# ---------------------------------------------------------------------------
+# Assignments
+# ---------------------------------------------------------------------------
 
+
+def test_collects_local_variable_assignment() -> None:
+    visitor = create_visitor(
+        """
+def analyze(path):
+    result = parse_repository(path)
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert len(function.assignments) == 1
+
+    assignment = function.assignments[0]
+
+    assert assignment.target == "result"
+    assert assignment.value == "parse_repository(path)"
+    assert assignment.line_number == 3
+    assert assignment.is_instance_attribute is False
+
+
+def test_collects_instance_attribute_assignment() -> None:
+    visitor = create_visitor(
+        """
+class RepositoryAnalyzer:
+    def __init__(self, parser):
+        self.parser = parser
+"""
+    )
+
+    constructor = visitor.classes[0].methods[0]
+
+    assert len(constructor.assignments) == 1
+
+    assignment = constructor.assignments[0]
+
+    assert assignment.target == "self.parser"
+    assert assignment.value == "parser"
+    assert assignment.line_number == 4
+    assert assignment.is_instance_attribute is True
+
+
+def test_collects_constructor_call_assignment() -> None:
+    visitor = create_visitor(
+        """
+class RepositoryAnalyzer:
+    def __init__(self):
+        self.parser = PythonParser()
+"""
+    )
+
+    constructor = visitor.classes[0].methods[0]
+
+    assert len(constructor.assignments) == 1
+
+    assignment = constructor.assignments[0]
+
+    assert assignment.target == "self.parser"
+    assert assignment.value == "PythonParser()"
+    assert assignment.is_instance_attribute is True
+
+    assert [call.name for call in constructor.calls] == [
+        "PythonParser",
+    ]
+
+
+def test_collects_multiple_assignment_targets() -> None:
+    visitor = create_visitor(
+        """
+def create_values():
+    first = second = build_value()
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert [assignment.target for assignment in function.assignments] == [
+        "first",
+        "second",
+    ]
+
+    assert [assignment.value for assignment in function.assignments] == [
+        "build_value()",
+        "build_value()",
+    ]
+
+
+def test_collects_annotated_assignment() -> None:
+    visitor = create_visitor(
+        """
+def analyze():
+    result: AnalysisResult = create_result()
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert len(function.assignments) == 1
+
+    assignment = function.assignments[0]
+
+    assert assignment.target == "result"
+    assert assignment.value == "create_result()"
+    assert assignment.line_number == 3
+    assert assignment.is_instance_attribute is False
+
+
+def test_collects_annotated_instance_attribute_assignment() -> None:
+    visitor = create_visitor(
+        """
+class RepositoryAnalyzer:
+    def __init__(self, parser):
+        self.parser: PythonParser = parser
+"""
+    )
+
+    constructor = visitor.classes[0].methods[0]
+    assignment = constructor.assignments[0]
+
+    assert assignment.target == "self.parser"
+    assert assignment.value == "parser"
+    assert assignment.is_instance_attribute is True
+
+
+def test_collects_assignment_without_value() -> None:
+    visitor = create_visitor(
+        """
+def analyze():
+    result: AnalysisResult
+"""
+    )
+
+    assignment = visitor.functions[0].assignments[0]
+
+    assert assignment.target == "result"
+    assert assignment.value is None
+    assert assignment.is_instance_attribute is False
+
+
+def test_assignments_do_not_leak_between_functions() -> None:
+    visitor = create_visitor(
+        """
+def first():
+    result = load_repository()
+
+
+def second():
+    result = save_repository()
+"""
+    )
+
+    first_function = visitor.functions[0]
+    second_function = visitor.functions[1]
+
+    assert [assignment.value for assignment in first_function.assignments] == [
+        "load_repository()",
+    ]
+
+    assert [assignment.value for assignment in second_function.assignments] == [
+        "save_repository()",
+    ]
+
+
+def test_assignments_do_not_leak_between_methods() -> None:
+    visitor = create_visitor(
+        """
+class RepositoryAnalyzer:
+    def load(self):
+        self.result = load_repository()
+
+    def save(self):
+        self.result = save_repository()
+"""
+    )
+
+    parsed_class = visitor.classes[0]
+
+    load_method = parsed_class.methods[0]
+    save_method = parsed_class.methods[1]
+
+    assert [assignment.value for assignment in load_method.assignments] == [
+        "load_repository()",
+    ]
+
+    assert [assignment.value for assignment in save_method.assignments] == [
+        "save_repository()",
+    ]
+
+
+def test_collects_assignment_inside_control_flow() -> None:
+    visitor = create_visitor(
+        """
+def analyze(repository):
+    if repository.is_valid():
+        result = repository.parse()
+"""
+    )
+
+    assignment = visitor.functions[0].assignments[0]
+
+    assert assignment.target == "result"
+    assert assignment.value == "repository.parse()"
+
+
+def test_ignores_unsupported_subscript_assignment_target() -> None:
+    visitor = create_visitor(
+        """
+def configure(config):
+    config["timeout"] = 30
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert function.assignments == []
+
+    
 # ---------------------------------------------------------------------------
 # Classes and methods
 # ---------------------------------------------------------------------------
