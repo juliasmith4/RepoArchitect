@@ -4,6 +4,7 @@ import ast
 
 from .models import (
     ImportInfo,
+    ParsedCall,
     ParsedClass,
     ParsedFunction,
     ParsedParameter,
@@ -22,18 +23,41 @@ def expression_to_string(node: ast.AST | None) -> str | None:
         return None
 
 
+def get_call_name(node: ast.AST) -> str | None:
+    """Return the readable name of a called function or method.
+
+    Examples:
+        parse_repository() -> "parse_repository"
+        repository.save() -> "repository.save"
+        self.database.commit() -> "self.database.commit"
+    """
+
+    if isinstance(node, ast.Name):
+        return node.id
+
+    if isinstance(node, ast.Attribute):
+        parent_name = get_call_name(node.value)
+
+        if parent_name is None:
+            return node.attr
+
+        return f"{parent_name}.{node.attr}"
+
+    return None
+
+
 def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
     """Convert function arguments into ParsedParameter objects."""
 
     parameters: list[ParsedParameter] = []
 
-    # Positional-only and regular positional parameters are handled together.
+    # Positional-only and regular positional arguments are handled together.
     positional_arguments = [
         *arguments.posonlyargs,
         *arguments.args,
     ]
 
-    # Python stores defaults only for the final positional parameters.
+    # Positional defaults only apply to the final positional parameters.
     default_offset = len(positional_arguments) - len(arguments.defaults)
 
     for index, argument in enumerate(positional_arguments):
@@ -51,7 +75,7 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # Collect *args.
+    # *args
     if arguments.vararg is not None:
         parameters.append(
             ParsedParameter(
@@ -63,7 +87,7 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # Collect keyword-only parameters.
+    # Keyword-only parameters
     for argument, default_node in zip(
         arguments.kwonlyargs,
         arguments.kw_defaults,
@@ -77,7 +101,7 @@ def parse_parameters(arguments: ast.arguments) -> list[ParsedParameter]:
             )
         )
 
-    # Collect **kwargs.
+    # **kwargs
     if arguments.kwarg is not None:
         parameters.append(
             ParsedParameter(
@@ -100,10 +124,14 @@ class PythonAstVisitor(ast.NodeVisitor):
         self.functions: list[ParsedFunction] = []
         self.classes: list[ParsedClass] = []
 
-        # Holds the classes that the visitor is currently inside.
+        # Classes that the visitor is currently inside.
         self._class_stack: list[ParsedClass] = []
 
-        # Prevents nested functions from being treated as top-level functions.
+        # Functions that the visitor is currently inside.
+        # This allows calls to be attached to the correct function.
+        self._function_stack: list[ParsedFunction] = []
+
+        # Prevent nested functions from being stored as top-level functions.
         self._function_depth = 0
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -123,11 +151,15 @@ class PythonAstVisitor(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Collect from-import statements."""
 
-        # node.module can be None for relative imports such as:
-        # from . import models
         module = node.module or ""
 
-        # Preserve the leading dots for relative imports.
+        # Preserve relative import dots.
+        #
+        # from .models import Item
+        # becomes module=".models"
+        #
+        # from ..services import Parser
+        # becomes module="..services"
         if node.level > 0:
             module = f"{'.' * node.level}{module}"
 
@@ -197,6 +229,23 @@ class PythonAstVisitor(ast.NodeVisitor):
         finally:
             self._class_stack.pop()
 
+    def visit_Call(self, node: ast.Call) -> None:
+        """Collect a function or method call inside the current function."""
+
+        if self._function_stack:
+            call_name = get_call_name(node.func)
+
+            if call_name is not None:
+                self._function_stack[-1].calls.append(
+                    ParsedCall(
+                        name=call_name,
+                        line_number=node.lineno,
+                    )
+                )
+
+        # Continue visiting arguments and nested calls.
+        self.generic_visit(node)
+
     def _visit_function(
         self,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -205,44 +254,58 @@ class PythonAstVisitor(ast.NodeVisitor):
     ) -> None:
         """Create and store a ParsedFunction from a function AST node."""
 
-        # A function found while already inside another function is nested.
-        # RepoArchitect can support nested functions later.
         is_nested_function = self._function_depth > 0
 
-        if not is_nested_function:
-            parent_class = (
-                self._class_stack[-1].name
-                if self._class_stack
-                else None
-            )
+        # Nested functions are traversed but are not stored as top-level
+        # functions or class methods in the current version.
+        if is_nested_function:
+            self._function_depth += 1
 
-            parsed_function = ParsedFunction(
-                name=node.name,
-                parameters=parse_parameters(node.args),
-                decorators=[
-                    expression
-                    for decorator in node.decorator_list
-                    if (
-                        expression := expression_to_string(decorator)
-                    ) is not None
-                ],
-                return_annotation=expression_to_string(node.returns),
-                docstring=ast.get_docstring(node),
-                start_line=node.lineno,
-                end_line=getattr(node, "end_lineno", None),
-                is_async=is_async,
-                is_method=bool(self._class_stack),
-                parent_class=parent_class,
-            )
+            try:
+                self.generic_visit(node)
+            finally:
+                self._function_depth -= 1
 
-            if self._class_stack:
-                self._class_stack[-1].methods.append(parsed_function)
-            else:
-                self.functions.append(parsed_function)
+            return
+
+        parent_class = (
+            self._class_stack[-1].name
+            if self._class_stack
+            else None
+        )
+
+        parsed_function = ParsedFunction(
+            name=node.name,
+            parameters=parse_parameters(node.args),
+            decorators=[
+                expression
+                for decorator in node.decorator_list
+                if (
+                    expression := expression_to_string(decorator)
+                ) is not None
+            ],
+            return_annotation=expression_to_string(node.returns),
+            docstring=ast.get_docstring(node),
+            start_line=node.lineno,
+            end_line=getattr(node, "end_lineno", None),
+            is_async=is_async,
+            is_method=bool(self._class_stack),
+            parent_class=parent_class,
+            calls=[],
+        )
+
+        if self._class_stack:
+            self._class_stack[-1].methods.append(parsed_function)
+        else:
+            self.functions.append(parsed_function)
 
         self._function_depth += 1
+        self._function_stack.append(parsed_function)
 
         try:
             self.generic_visit(node)
         finally:
+            self._function_stack.pop()
             self._function_depth -= 1
+
+            

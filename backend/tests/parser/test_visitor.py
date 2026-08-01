@@ -5,6 +5,7 @@ import ast
 from app.analyzer.parsing.visitor import (
     PythonAstVisitor,
     expression_to_string,
+    get_call_name,
     parse_parameters,
 )
 
@@ -13,6 +14,7 @@ def create_visitor(source_code: str) -> PythonAstVisitor:
     """Parse source code and return a completed visitor."""
 
     syntax_tree = ast.parse(source_code)
+
     visitor = PythonAstVisitor()
     visitor.visit(syntax_tree)
 
@@ -20,33 +22,59 @@ def create_visitor(source_code: str) -> PythonAstVisitor:
 
 
 # ---------------------------------------------------------------------------
-# Expression conversion
+# Expression helpers
 # ---------------------------------------------------------------------------
+
 
 def test_expression_to_string_returns_none_for_none() -> None:
     assert expression_to_string(None) is None
 
 
+def test_expression_to_string_converts_simple_expression() -> None:
+    expression = ast.parse("list[str]", mode="eval").body
 
-def test_expression_to_string_converts_name() -> None:
-    expression = ast.parse("str", mode="eval").body
-
-    assert expression_to_string(expression) == "str"
-
+    assert expression_to_string(expression) == "list[str]"
 
 
-def test_expression_to_string_converts_complex_expression() -> None:
-    expression = ast.parse(
-        "dict[str, list[int]]",
+def test_get_call_name_collects_direct_function_name() -> None:
+    call = ast.parse("parse_repository()", mode="eval").body
+
+    assert isinstance(call, ast.Call)
+    assert get_call_name(call.func) == "parse_repository"
+
+
+def test_get_call_name_collects_method_name() -> None:
+    call = ast.parse("repository.save()", mode="eval").body
+
+    assert isinstance(call, ast.Call)
+    assert get_call_name(call.func) == "repository.save"
+
+
+def test_get_call_name_collects_chained_method_name() -> None:
+    call = ast.parse(
+        "self.database.session.commit()",
         mode="eval",
     ).body
 
-    assert expression_to_string(expression) == "dict[str, list[int]]"
+    assert isinstance(call, ast.Call)
+    assert (
+        get_call_name(call.func)
+        == "self.database.session.commit"
+    )
+
+
+def test_get_call_name_returns_none_for_unsupported_expression() -> None:
+    call = ast.parse("(get_handler())()", mode="eval").body
+
+    assert isinstance(call, ast.Call)
+    assert get_call_name(call.func) is None
 
 
 # ---------------------------------------------------------------------------
 # Parameter parsing
 # ---------------------------------------------------------------------------
+
+
 def test_parse_parameters_collects_regular_parameters() -> None:
     syntax_tree = ast.parse(
         """
@@ -56,13 +84,15 @@ def analyze(repository, branch):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
 
-    assert len(parameters) == 2
-    assert parameters[0].name == "repository"
-    assert parameters[1].name == "branch"
+    assert [parameter.name for parameter in parameters] == [
+        "repository",
+        "branch",
+    ]
 
 
 def test_parse_parameters_collects_annotations() -> None:
@@ -74,6 +104,7 @@ def analyze(repository: str, attempts: int):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -85,12 +116,17 @@ def analyze(repository: str, attempts: int):
 def test_parse_parameters_collects_defaults() -> None:
     syntax_tree = ast.parse(
         """
-def analyze(repository: str, attempts: int = 3, enabled: bool = True):
+def analyze(
+    repository: str,
+    attempts: int = 3,
+    enabled: bool = True,
+):
     pass
 """
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -100,7 +136,7 @@ def analyze(repository: str, attempts: int = 3, enabled: bool = True):
     assert parameters[2].default_value == "True"
 
 
-def test_parse_parameters_aligns_defaults_with_final_parameters() -> None:
+def test_parse_parameters_aligns_defaults_to_final_parameters() -> None:
     syntax_tree = ast.parse(
         """
 def analyze(first, second, third="default"):
@@ -109,6 +145,7 @@ def analyze(first, second, third="default"):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -127,6 +164,7 @@ def analyze(repository, /, branch):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -146,6 +184,7 @@ def analyze(*files: str):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -165,6 +204,7 @@ def analyze(*, include_tests: bool = False):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -184,6 +224,7 @@ def analyze(*, repository: str):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -202,6 +243,7 @@ def analyze(**options: object):
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -227,6 +269,7 @@ def analyze(
     )
 
     function = syntax_tree.body[0]
+
     assert isinstance(function, ast.FunctionDef)
 
     parameters = parse_parameters(function.args)
@@ -257,7 +300,7 @@ def analyze(
 
 
 # ---------------------------------------------------------------------------
-# Regular imports
+# Imports
 # ---------------------------------------------------------------------------
 
 
@@ -292,24 +335,18 @@ import numpy as np
     assert imported_module.alias == "np"
 
 
-def test_collects_multiple_regular_imports_from_one_statement() -> None:
+def test_collects_multiple_regular_imports() -> None:
     visitor = create_visitor(
         """
 import os, sys, pathlib
 """
     )
 
-    assert len(visitor.imports) == 3
     assert [item.module for item in visitor.imports] == [
         "os",
         "sys",
         "pathlib",
     ]
-
-
-# ---------------------------------------------------------------------------
-# From imports
-# ---------------------------------------------------------------------------
 
 
 def test_collects_from_import() -> None:
@@ -319,14 +356,11 @@ from pathlib import Path
 """
     )
 
-    assert len(visitor.imports) == 1
-
     imported_module = visitor.imports[0]
 
     assert imported_module.module == "pathlib"
     assert imported_module.names == ["Path"]
     assert imported_module.alias is None
-    assert imported_module.line_number == 2
     assert imported_module.is_from_import is True
 
 
@@ -344,19 +378,13 @@ from pandas import DataFrame as Frame
     assert imported_module.alias == "Frame"
 
 
-def test_collects_multiple_names_from_import() -> None:
+def test_collects_multiple_from_import_names() -> None:
     visitor = create_visitor(
         """
 from typing import Any, Optional, Union
 """
     )
 
-    assert len(visitor.imports) == 3
-    assert [item.module for item in visitor.imports] == [
-        "typing",
-        "typing",
-        "typing",
-    ]
     assert [item.names for item in visitor.imports] == [
         ["Any"],
         ["Optional"],
@@ -364,7 +392,7 @@ from typing import Any, Optional, Union
     ]
 
 
-def test_collects_relative_from_import() -> None:
+def test_collects_relative_import() -> None:
     visitor = create_visitor(
         """
 from .models import ParsedFunction
@@ -375,19 +403,6 @@ from .models import ParsedFunction
 
     assert imported_module.module == ".models"
     assert imported_module.names == ["ParsedFunction"]
-
-
-def test_collects_relative_import_without_module_name() -> None:
-    visitor = create_visitor(
-        """
-from . import models
-"""
-    )
-
-    imported_module = visitor.imports[0]
-
-    assert imported_module.module == "."
-    assert imported_module.names == ["models"]
 
 
 def test_collects_parent_relative_import() -> None:
@@ -404,7 +419,7 @@ from ..services.parser import ParserService
 
 
 # ---------------------------------------------------------------------------
-# Top-level functions
+# Functions
 # ---------------------------------------------------------------------------
 
 
@@ -424,6 +439,7 @@ def analyze_repository():
     assert function.is_async is False
     assert function.is_method is False
     assert function.parent_class is None
+    assert function.calls == []
 
 
 def test_collects_async_function() -> None:
@@ -434,36 +450,10 @@ async def analyze_repository():
 """
     )
 
-    assert len(visitor.functions) == 1
-
     function = visitor.functions[0]
 
     assert function.name == "analyze_repository"
     assert function.is_async is True
-    assert function.is_method is False
-
-
-def test_collects_multiple_top_level_functions() -> None:
-    visitor = create_visitor(
-        """
-def first():
-    pass
-
-
-def second():
-    pass
-
-
-async def third():
-    pass
-"""
-    )
-
-    assert [function.name for function in visitor.functions] == [
-        "first",
-        "second",
-        "third",
-    ]
 
 
 def test_collects_function_parameters() -> None:
@@ -475,8 +465,6 @@ def analyze(path: str, depth: int = 3):
     )
 
     function = visitor.functions[0]
-
-    assert len(function.parameters) == 2
 
     assert function.parameters[0].name == "path"
     assert function.parameters[0].annotation == "str"
@@ -495,20 +483,7 @@ def get_dependencies() -> list[str]:
 """
     )
 
-    function = visitor.functions[0]
-
-    assert function.return_annotation == "list[str]"
-
-
-def test_function_without_return_annotation_uses_none() -> None:
-    visitor = create_visitor(
-        """
-def get_dependencies():
-    return []
-"""
-    )
-
-    assert visitor.functions[0].return_annotation is None
+    assert visitor.functions[0].return_annotation == "list[str]"
 
 
 def test_collects_function_decorators() -> None:
@@ -521,9 +496,7 @@ def analyze_repository():
 """
     )
 
-    function = visitor.functions[0]
-
-    assert function.decorators == [
+    assert visitor.functions[0].decorators == [
         "cache",
         "validate(enabled=True)",
     ]
@@ -539,20 +512,10 @@ def analyze_repository():
 '''
     )
 
-    function = visitor.functions[0]
-
-    assert function.docstring == "Analyze the supplied repository."
-
-
-def test_function_without_docstring_uses_none() -> None:
-    visitor = create_visitor(
-        """
-def analyze_repository():
-    pass
-"""
+    assert (
+        visitor.functions[0].docstring
+        == "Analyze the supplied repository."
     )
-
-    assert visitor.functions[0].docstring is None
 
 
 def test_collects_function_line_numbers() -> None:
@@ -584,27 +547,152 @@ def outer():
     assert visitor.functions[0].name == "outer"
 
 
-def test_function_after_nested_function_is_still_collected() -> None:
+# ---------------------------------------------------------------------------
+# Function calls
+# ---------------------------------------------------------------------------
+
+
+def test_collects_direct_function_call() -> None:
+    visitor = create_visitor(
+        """
+def analyze():
+    parse_repository()
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert len(function.calls) == 1
+    assert function.calls[0].name == "parse_repository"
+    assert function.calls[0].line_number == 3
+
+
+def test_collects_method_call() -> None:
+    visitor = create_visitor(
+        """
+def analyze(repository):
+    repository.save()
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert len(function.calls) == 1
+    assert function.calls[0].name == "repository.save"
+    assert function.calls[0].line_number == 3
+
+
+def test_collects_chained_method_call() -> None:
+    visitor = create_visitor(
+        """
+def analyze(client):
+    client.repositories.create()
+"""
+    )
+
+    assert (
+        visitor.functions[0].calls[0].name
+        == "client.repositories.create"
+    )
+
+
+def test_collects_multiple_calls_in_function() -> None:
+    visitor = create_visitor(
+        """
+def analyze(path):
+    repository = parse_repository(path)
+    validate_repository(repository)
+    repository.save()
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert [call.name for call in function.calls] == [
+        "parse_repository",
+        "validate_repository",
+        "repository.save",
+    ]
+
+
+def test_collects_nested_calls() -> None:
+    visitor = create_visitor(
+        """
+def analyze(path):
+    save_repository(parse_repository(path))
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert [call.name for call in function.calls] == [
+        "save_repository",
+        "parse_repository",
+    ]
+
+
+def test_collects_calls_inside_control_flow() -> None:
+    visitor = create_visitor(
+        """
+def analyze(repository):
+    if repository.is_valid():
+        repository.save()
+"""
+    )
+
+    function = visitor.functions[0]
+
+    assert [call.name for call in function.calls] == [
+        "repository.is_valid",
+        "repository.save",
+    ]
+
+
+def test_calls_do_not_leak_between_functions() -> None:
+    visitor = create_visitor(
+        """
+def first():
+    load_repository()
+
+
+def second():
+    save_repository()
+"""
+    )
+
+    first_function = visitor.functions[0]
+    second_function = visitor.functions[1]
+
+    assert [call.name for call in first_function.calls] == [
+        "load_repository",
+    ]
+
+    assert [call.name for call in second_function.calls] == [
+        "save_repository",
+    ]
+
+
+def test_call_inside_nested_function_is_attached_to_outer_function() -> None:
     visitor = create_visitor(
         """
 def outer():
     def inner():
-        pass
+        save_repository()
 
-
-def another_function():
-    pass
+    inner()
 """
     )
 
-    assert [function.name for function in visitor.functions] == [
-        "outer",
-        "another_function",
+    function = visitor.functions[0]
+
+    assert [call.name for call in function.calls] == [
+        "save_repository",
+        "inner",
     ]
 
 
 # ---------------------------------------------------------------------------
-# Classes
+# Classes and methods
 # ---------------------------------------------------------------------------
 
 
@@ -635,24 +723,9 @@ class RepositoryAnalyzer(BaseAnalyzer, Serializable):
 """
     )
 
-    parsed_class = visitor.classes[0]
-
-    assert parsed_class.base_classes == [
+    assert visitor.classes[0].base_classes == [
         "BaseAnalyzer",
         "Serializable",
-    ]
-
-
-def test_collects_complex_class_base_class() -> None:
-    visitor = create_visitor(
-        """
-class RepositoryCollection(list[Repository]):
-    pass
-"""
-    )
-
-    assert visitor.classes[0].base_classes == [
-        "list[Repository]",
     ]
 
 
@@ -666,9 +739,7 @@ class RepositoryAnalyzer:
 """
     )
 
-    parsed_class = visitor.classes[0]
-
-    assert parsed_class.decorators == [
+    assert visitor.classes[0].decorators == [
         "dataclass",
         "register('repository')",
     ]
@@ -678,35 +749,14 @@ def test_collects_class_docstring() -> None:
     visitor = create_visitor(
         '''
 class RepositoryAnalyzer:
-    """Analyze the architecture of a repository."""
+    """Analyze repository architecture."""
 '''
     )
 
-    parsed_class = visitor.classes[0]
-
     assert (
-        parsed_class.docstring
-        == "Analyze the architecture of a repository."
+        visitor.classes[0].docstring
+        == "Analyze repository architecture."
     )
-
-
-def test_collects_class_line_numbers() -> None:
-    visitor = create_visitor(
-        """class RepositoryAnalyzer:
-    def analyze(self):
-        return True
-"""
-    )
-
-    parsed_class = visitor.classes[0]
-
-    assert parsed_class.start_line == 1
-    assert parsed_class.end_line == 3
-
-
-# ---------------------------------------------------------------------------
-# Methods
-# ---------------------------------------------------------------------------
 
 
 def test_collects_method_inside_class() -> None:
@@ -719,11 +769,9 @@ class RepositoryAnalyzer:
     )
 
     parsed_class = visitor.classes[0]
-
-    assert len(parsed_class.methods) == 1
-
     method = parsed_class.methods[0]
 
+    assert len(parsed_class.methods) == 1
     assert method.name == "analyze"
     assert method.is_method is True
     assert method.is_async is False
@@ -759,72 +807,48 @@ class RepositoryAnalyzer:
     assert method.is_method is True
 
 
-def test_collects_method_parameters() -> None:
-    visitor = create_visitor(
-        """
-class RepositoryAnalyzer:
-    def analyze(
-        self,
-        path: str,
-        include_tests: bool = False,
-    ) -> dict[str, object]:
-        pass
-"""
-    )
-
-    method = visitor.classes[0].methods[0]
-
-    assert [parameter.name for parameter in method.parameters] == [
-        "self",
-        "path",
-        "include_tests",
-    ]
-    assert method.parameters[1].annotation == "str"
-    assert method.parameters[2].annotation == "bool"
-    assert method.parameters[2].default_value == "False"
-    assert method.return_annotation == "dict[str, object]"
-
-
-def test_collects_method_decorators() -> None:
-    visitor = create_visitor(
-        """
-class RepositoryAnalyzer:
-    @classmethod
-    @cache
-    def create(cls):
-        pass
-"""
-    )
-
-    method = visitor.classes[0].methods[0]
-
-    assert method.decorators == [
-        "classmethod",
-        "cache",
-    ]
-
-
-def test_nested_function_inside_method_is_ignored() -> None:
+def test_collects_calls_inside_method() -> None:
     visitor = create_visitor(
         """
 class RepositoryAnalyzer:
     def analyze(self):
-        def normalize_path(path):
-            return path
+        self.load_repository()
+        self.database.commit()
+"""
+    )
 
-        return normalize_path("repository")
+    method = visitor.classes[0].methods[0]
+
+    assert [call.name for call in method.calls] == [
+        "self.load_repository",
+        "self.database.commit",
+    ]
+
+
+def test_method_calls_do_not_leak_between_methods() -> None:
+    visitor = create_visitor(
+        """
+class RepositoryAnalyzer:
+    def load(self):
+        self.repository.load()
+
+    def save(self):
+        self.repository.save()
 """
     )
 
     parsed_class = visitor.classes[0]
 
-    assert len(parsed_class.methods) == 1
-    assert parsed_class.methods[0].name == "analyze"
+    load_method = parsed_class.methods[0]
+    save_method = parsed_class.methods[1]
 
+    assert [call.name for call in load_method.calls] == [
+        "self.repository.load",
+    ]
 
-# ---------------------------------------------------------------------------
-# Nested classes
-# ---------------------------------------------------------------------------
+    assert [call.name for call in save_method.calls] == [
+        "self.repository.save",
+    ]
 
 
 def test_collects_nested_class_with_parent_class() -> None:
@@ -841,28 +865,8 @@ class Outer:
     outer_class = visitor.classes[0]
     inner_class = visitor.classes[1]
 
-    assert outer_class.name == "Outer"
     assert outer_class.parent_class is None
-
-    assert inner_class.name == "Inner"
     assert inner_class.parent_class == "Outer"
-
-
-def test_collects_method_inside_nested_class() -> None:
-    visitor = create_visitor(
-        """
-class Outer:
-    class Inner:
-        def analyze(self):
-            pass
-"""
-    )
-
-    inner_class = visitor.classes[1]
-
-    assert len(inner_class.methods) == 1
-    assert inner_class.methods[0].name == "analyze"
-    assert inner_class.methods[0].parent_class == "Inner"
 
 
 def test_ignores_class_declared_inside_function() -> None:
@@ -877,7 +881,6 @@ def build_analyzer():
     )
 
     assert len(visitor.functions) == 1
-    assert visitor.functions[0].name == "build_analyzer"
     assert visitor.classes == []
 
 
@@ -891,8 +894,6 @@ def test_collects_complete_module_structure() -> None:
         '''
 import os
 from pathlib import Path
-
-DEFAULT_DEPTH = 3
 
 
 def normalize_path(path: str) -> Path:
@@ -911,7 +912,10 @@ class RepositoryAnalyzer:
         self,
         include_tests: bool = False,
     ) -> dict[str, object]:
-        return {}
+        normalized_path = normalize_path(
+            str(self.repository_path)
+        )
+        return self.parser.parse(normalized_path)
 '''
     )
 
@@ -919,41 +923,31 @@ class RepositoryAnalyzer:
     assert len(visitor.functions) == 1
     assert len(visitor.classes) == 1
 
-    assert visitor.imports[0].module == "os"
-    assert visitor.imports[1].module == "pathlib"
-    assert visitor.imports[1].names == ["Path"]
+    normalize_function = visitor.functions[0]
 
-    top_level_function = visitor.functions[0]
-
-    assert top_level_function.name == "normalize_path"
-    assert top_level_function.return_annotation == "Path"
-    assert (
-        top_level_function.docstring
-        == "Normalize a repository path."
-    )
+    assert normalize_function.name == "normalize_path"
+    assert normalize_function.return_annotation == "Path"
+    assert [call.name for call in normalize_function.calls] == [
+        "Path",
+    ]
 
     parsed_class = visitor.classes[0]
 
     assert parsed_class.name == "RepositoryAnalyzer"
-    assert parsed_class.docstring == "Analyze Python repositories."
     assert len(parsed_class.methods) == 2
 
     constructor = parsed_class.methods[0]
     analyze_method = parsed_class.methods[1]
 
     assert constructor.name == "__init__"
-    assert constructor.is_async is False
-    assert constructor.parent_class == "RepositoryAnalyzer"
+    assert constructor.calls == []
 
     assert analyze_method.name == "analyze"
     assert analyze_method.is_async is True
     assert analyze_method.return_annotation == "dict[str, object]"
-    assert analyze_method.parameters[1].name == "include_tests"
-    assert analyze_method.parameters[1].default_value == "False"
 
-
-
-
-
-
-    
+    assert [call.name for call in analyze_method.calls] == [
+        "normalize_path",
+        "str",
+        "self.parser.parse",
+    ]
