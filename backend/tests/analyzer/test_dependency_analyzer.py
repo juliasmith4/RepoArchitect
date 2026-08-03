@@ -317,3 +317,13 @@ def test_preserves_call_and_instantiation_dependencies() -> None:
             "instantiates",
         ),
     ]
+
+def load():
+    read_file()
+
+class RepositoryAnalyzer:
+    def __init__(self):
+        self.parser = PythonParser()
+
+    def analyze(self):
+        self.parser.parse()
