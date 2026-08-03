@@ -60,6 +60,16 @@ class RepositoryAnalyzer:
     )
 
     assert (
+        result.resolved_dependencies[2].target
+        == "PythonParser.parse"
+    )
+
+    assert (
         result.resolved_dependencies[2].target_category
-        == "unresolved"
+        == "imported"
+    )
+
+    assert (
+        result.resolved_dependencies[2].imported_from
+        == "app.parsers.PythonParser"
     )
