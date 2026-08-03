@@ -181,24 +181,45 @@ class DependencyAnalyzer:
 
         return function.name
 
-def analyze_module(
-    self,
-    *,
-    functions: list[ParsedFunction],
-    classes: list[ParsedClass],
-) -> list[Dependency]:
-    """Extract dependencies from all module-level functions and classes."""
+    def analyze_module(
+        self,
+        *,
+        functions: list[ParsedFunction],
+        classes: list[ParsedClass],
+    ) -> list[Dependency]:
+        """Extract dependencies from all module-level functions and classes."""
 
-    dependencies: list[Dependency] = []
+        dependencies: list[Dependency] = []
 
-    for function in functions:
-        dependencies.extend(
-            self.analyze_function(function)
-        )
+        for function in functions:
+            dependencies.extend(
+                self.analyze_function(function)
+            )
 
-    for parsed_class in classes:
-        dependencies.extend(
-            self.analyze_class(parsed_class)
-        )
+        for parsed_class in classes:
+            dependencies.extend(
+                self.analyze_class(parsed_class)
+            )
 
-    return dependencies
+        return dependencies
+    def analyze_module(
+        self,
+        *,
+        functions: list[ParsedFunction],
+        classes: list[ParsedClass],
+    ) -> list[Dependency]:
+        """Extract dependencies from a complete parsed module."""
+
+        dependencies: list[Dependency] = []
+
+        for function in functions:
+            dependencies.extend(
+                self.analyze_function(function)
+            )
+
+        for parsed_class in classes:
+            dependencies.extend(
+                self.analyze_class(parsed_class)
+            )
+
+        return dependencies
