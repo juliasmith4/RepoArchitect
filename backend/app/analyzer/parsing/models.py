@@ -11,7 +11,7 @@ class ImportInfo:
     module: str
     names: list[str] = field(default_factory=list)
     alias: str | None = None
-    line_number: int = 0
+    line_number: int | None = None
     is_from_import: bool = False
 
 
@@ -29,7 +29,7 @@ class ParsedCall:
     """A function or method call found in source code."""
 
     name: str
-    line_number: int = 0
+    line_number: int | None = None
 
 
 @dataclass(slots=True)
@@ -38,7 +38,7 @@ class ParsedAssignment:
 
     target: str
     value: str | None = None
-    line_number: int = 0
+    line_number: int | None = None
     is_instance_attribute: bool = False
 
 
@@ -47,7 +47,7 @@ class ParsedReturn:
     """A return statement found inside a function or method."""
 
     value: str | None = None
-    line_number: int = 0
+    line_number: int | None = None
 
 
 @dataclass(slots=True)
@@ -70,7 +70,7 @@ class ParsedFunction:
 
     @property
     def line_count(self) -> int | None:
-        """Return the inclusive number of lines occupied by the function."""
+        """Return the inclusive number of source lines occupied."""
 
         if self.start_line is None or self.end_line is None:
             return None
@@ -93,7 +93,7 @@ class ParsedClass:
 
     @property
     def line_count(self) -> int | None:
-        """Return the inclusive number of lines occupied by the class."""
+        """Return the inclusive number of source lines occupied."""
 
         if self.start_line is None or self.end_line is None:
             return None
@@ -102,14 +102,14 @@ class ParsedClass:
 
     @property
     def method_count(self) -> int:
-        """Return the number of methods directly stored on the class."""
+        """Return the number of methods stored on the class."""
 
         return len(self.methods)
 
 
 @dataclass(slots=True)
 class ParsedModule:
-    """The complete parsed representation of one Python source file."""
+    """Structured parsing result for one Python source file."""
 
     path: Path
     module_name: str
@@ -118,15 +118,16 @@ class ParsedModule:
     classes: list[ParsedClass] = field(default_factory=list)
     docstring: str | None = None
     parse_error: str | None = None
+
     @property
     def file_path(self) -> str:
-        """Return the path as a string for graph and API output."""
+        """Return the file path as a string."""
 
         return str(self.path)
 
     @property
     def import_count(self) -> int:
-        """Return the number of parsed import entries."""
+        """Return the number of parsed imports."""
 
         return len(self.imports)
 
@@ -153,10 +154,10 @@ class ParsedModule:
 
     @property
     def was_parsed_successfully(self) -> bool:
-        """Return whether parsing completed without a syntax error."""
+        """Return whether parsing completed without an error."""
 
         return self.parse_error is None
 
 
-# Backward-compatible name used by existing tests and older code.
+# Temporary compatibility alias for existing code and tests.
 ParsedFile = ParsedModule
