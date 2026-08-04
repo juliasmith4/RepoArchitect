@@ -5,12 +5,17 @@ from .dependency_graph import (
     DependencyNode,
     DependencyType,
 )
-from .builder import DependencyGraphBuilder
+from .builder import (
+    DependencyGraphBuilder,
+    resolve_relative_import,
+)
 __all__ = [
     "DependencyEdge",
     "DependencyGraph",
+    "DependencyGraphBuilder",
     "DependencyGraphAnalyzer",
     "DependencyNode",
     "DependencyType",
+    "resolve_relative_import",
     "ModuleMetrics",
 ]
