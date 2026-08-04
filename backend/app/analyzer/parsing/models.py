@@ -70,7 +70,7 @@ class ParsedFunction:
 
     @property
     def line_count(self) -> int | None:
-        """Return the number of source lines occupied by the function."""
+        """Return the inclusive number of source lines occupied."""
 
         if self.start_line is None or self.end_line is None:
             return None
@@ -93,24 +93,43 @@ class ParsedClass:
 
     @property
     def line_count(self) -> int | None:
-        """Return the number of source lines occupied by the class."""
+        """Return the inclusive number of source lines occupied."""
 
         if self.start_line is None or self.end_line is None:
             return None
 
         return self.end_line - self.start_line + 1
 
+    @property
+    def method_count(self) -> int:
+        """Return the number of methods stored on the class."""
+
+        return len(self.methods)
+
 
 @dataclass(slots=True)
-class ParsedFile:
-    """Structured parsing result for one Python file."""
+class ParsedModule:
+    """Structured parsing result for one Python source file."""
 
     path: Path
     module_name: str
     imports: list[ImportInfo] = field(default_factory=list)
     functions: list[ParsedFunction] = field(default_factory=list)
     classes: list[ParsedClass] = field(default_factory=list)
+    docstring: str | None = None
     parse_error: str | None = None
+
+    @property
+    def file_path(self) -> str:
+        """Return the file path as a string."""
+
+        return str(self.path)
+
+    @property
+    def import_count(self) -> int:
+        """Return the number of parsed imports."""
+
+        return len(self.imports)
 
     @property
     def function_count(self) -> int:
@@ -129,7 +148,7 @@ class ParsedFile:
         """Return the total number of methods across all classes."""
 
         return sum(
-            len(parsed_class.methods)
+            parsed_class.method_count
             for parsed_class in self.classes
         )
 
@@ -138,3 +157,7 @@ class ParsedFile:
         """Return whether parsing completed without an error."""
 
         return self.parse_error is None
+
+
+# Temporary compatibility alias for existing code and tests.
+ParsedFile = ParsedModule
