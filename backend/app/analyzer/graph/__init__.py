@@ -5,7 +5,7 @@ from .dependency_graph import (
     DependencyNode,
     DependencyType,
 )
-
+from .builder import DependencyGraphBuilder
 __all__ = [
     "DependencyEdge",
     "DependencyGraph",
