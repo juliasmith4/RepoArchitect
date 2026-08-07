@@ -1,75 +1,87 @@
-"""Tests for the Python analysis service."""
+from pathlib import Path
 
+from app.analyzer.graph import DependencyType
 from app.analyzer.service import PythonAnalysisService
 
 
-def test_analyzes_python_source_end_to_end() -> None:
-    source_code = """
-from app.parsers import PythonParser
+def test_analyzes_repository_end_to_end(
+    tmp_path: Path,
+) -> None:
+    services_directory = (
+        tmp_path / "services"
+    )
+
+    services_directory.mkdir()
+
+    main_file = tmp_path / "main.py"
+    users_file = (
+        services_directory / "users.py"
+    )
+
+    main_file.write_text(
+        """
+from services.users import get_user
+import requests
 
 
-class RepositoryAnalyzer:
-    def __init__(self):
-        self.parser = PythonParser()
+def run():
+    return get_user()
+""".strip(),
+        encoding="utf-8",
+    )
 
-    def analyze(self, path: str):
-        return self.parser.parse(path)
-"""
+    users_file.write_text(
+        """
+def get_user():
+    return {"id": 1}
+""".strip(),
+        encoding="utf-8",
+    )
 
     service = PythonAnalysisService()
-    result = service.analyze_source(source_code)
 
-    assert len(result.imports) == 1
-    assert len(result.functions) == 0
-    assert len(result.classes) == 1
+    modules, graph, analyzer = (
+        service.analyze_repository(tmp_path)
+    )
 
-    assert result.classes[0].name == "RepositoryAnalyzer"
-    assert len(result.classes[0].methods) == 2
+    assert len(modules) == 2
 
-    assert [
-        dependency.dependency_type
-        for dependency in result.dependencies
-    ] == [
-        "calls",
-        "instantiates",
-        "calls",
-    ]
+    assert graph.has_node("main")
+    assert graph.has_node(
+        "services.users"
+    )
 
-    assert [
-        dependency.target
-        for dependency in result.dependencies
-    ] == [
-        "PythonParser",
-        "PythonParser",
-        "self.parser.parse",
-    ]
+    dependencies = graph.dependencies_of(
+        "main"
+    )
 
-    assert (
-        result.resolved_dependencies[0].target_category
-        == "imported"
+    internal_dependency = next(
+        edge
+        for edge in dependencies
+        if edge.target == "services.users"
+    )
+
+    external_dependency = next(
+        edge
+        for edge in dependencies
+        if edge.target == "requests"
     )
 
     assert (
-        result.resolved_dependencies[0].imported_from
-        == "app.parsers.PythonParser"
+        internal_dependency.dependency_type
+        == DependencyType.INTERNAL
     )
 
     assert (
-        result.resolved_dependencies[1].target_category
-        == "imported"
+        external_dependency.dependency_type
+        == DependencyType.EXTERNAL
+    )
+
+    users_metrics = analyzer.module_metrics(
+        "services.users"
     )
 
     assert (
-        result.resolved_dependencies[2].target
-        == "PythonParser.parse"
-    )
-
-    assert (
-        result.resolved_dependencies[2].target_category
-        == "imported"
-    )
-
-    assert (
-        result.resolved_dependencies[2].imported_from
-        == "app.parsers.PythonParser"
+        users_metrics.incoming_dependencies
+        == 1
     )
