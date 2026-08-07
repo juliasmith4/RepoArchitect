@@ -1,78 +1,59 @@
-"""High-level service for analyzing Python source code."""
+"""Main application service for repository analysis."""
 
-import ast
-from dataclasses import dataclass
+from pathlib import Path
 
-from app.analyzer.dependencies.analyzer import DependencyAnalyzer
-from app.analyzer.dependencies.models import (
-    Dependency,
-    ResolvedDependency,
+from app.analyzer.graph import (
+    DependencyGraph,
+    DependencyGraphAnalyzer,
+    DependencyGraphBuilder,
 )
-from app.analyzer.dependencies.resolver import DependencyResolver
-from app.analyzer.parsing.models import (
-    ImportInfo,
-    ParsedClass,
-    ParsedFunction,
-)
-from app.analyzer.parsing.visitor import PythonAstVisitor
-
-
-@dataclass
-class ModuleAnalysisResult:
-    """Complete analysis result for one Python module."""
-
-    imports: list[ImportInfo]
-    functions: list[ParsedFunction]
-    classes: list[ParsedClass]
-    dependencies: list[Dependency]
-    resolved_dependencies: list[ResolvedDependency]
+from app.analyzer.parsing.models import ParsedModule
+from app.analyzer.parsing.python_parser import PythonParser
+from app.analyzer.repository.scanner import RepositoryScanner
 
 
 class PythonAnalysisService:
-    """Run the complete Python module analysis pipeline."""
+    """Coordinate parsing and repository analysis."""
 
     def __init__(
         self,
-        *,
-        dependency_analyzer: DependencyAnalyzer | None = None,
-        dependency_resolver: DependencyResolver | None = None,
+        parser: PythonParser | None = None,
+        scanner: RepositoryScanner | None = None,
+        graph_builder: DependencyGraphBuilder | None = None,
     ) -> None:
-        self._dependency_analyzer = (
-            dependency_analyzer or DependencyAnalyzer()
-        )
-        self._dependency_resolver = (
-            dependency_resolver or DependencyResolver()
+        self.parser = parser or PythonParser()
+        self.scanner = scanner or RepositoryScanner()
+        self.graph_builder = (
+            graph_builder or DependencyGraphBuilder()
         )
 
-    def analyze_source(
+    def analyze_repository(
         self,
-        source_code: str,
-    ) -> ModuleAnalysisResult:
-        """Analyze Python source code from start to finish."""
+        repository_path: Path,
+    ) -> tuple[
+        list[ParsedModule],
+        DependencyGraph,
+        DependencyGraphAnalyzer,
+    ]:
+        files = self.scanner.scan(repository_path)
 
-        syntax_tree = ast.parse(source_code)
+        modules: list[ParsedModule] = []
 
-        visitor = PythonAstVisitor()
-        visitor.visit(syntax_tree)
-
-        dependencies = self._dependency_analyzer.analyze_module(
-            functions=visitor.functions,
-            classes=visitor.classes,
-        )
-
-        resolved_dependencies = (
-            self._dependency_resolver.resolve_dependencies(
-                dependencies=dependencies,
-                imports=visitor.imports,
-                functions=visitor.functions,
-                classes=visitor.classes,
+        for file_path in files:
+            source = file_path.read_text(
+                encoding="utf-8"
             )
-        )
 
-        return ModuleAnalysisResult(
-            imports=visitor.imports,
-            functions=visitor.functions,
-            classes=visitor.classes,
-            dependencies=dependencies,
-            resolved_dependencies=resolved_dependencies,
-        )
+            parsed_module = self.parser.parse(
+                source=source,
+                path=file_path,
+                repository_root=repository_path,
+            )
+
+            modules.append(parsed_module)
+
+        graph = self.graph_builder.build(modules)
+
+        analyzer = DependencyGraphAnalyzer(graph)
+
+        return modules, graph, analyzer
