@@ -1,40 +1,58 @@
-"""Main application service for repository analysis."""
-
+from dataclasses import dataclass
 from pathlib import Path
 
+from app.analyzer.findings import (
+    ArchitectureFinding,
+    ArchitectureFindingDetector,
+)
 from app.analyzer.graph import (
     DependencyGraph,
-    DependencyGraphAnalyzer,
     DependencyGraphBuilder,
+)
+from app.analyzer.metrics import (
+    RepositoryMetrics,
+    RepositoryMetricsCalculator,
 )
 from app.analyzer.parsing.models import ParsedModule
 from app.analyzer.parsing.python_parser import PythonParser
 from app.analyzer.repository.scanner import RepositoryScanner
 
 
-class PythonAnalysisService:
-    """Coordinate parsing and repository analysis."""
+@dataclass(slots=True)
+class RepositoryAnalysisResult:
+    """Complete result of analyzing a repository."""
 
+    modules: list[ParsedModule]
+    graph: DependencyGraph
+    metrics: RepositoryMetrics
+    findings: list[ArchitectureFinding]
+
+
+class PythonAnalysisService:
     def __init__(
         self,
         parser: PythonParser | None = None,
         scanner: RepositoryScanner | None = None,
         graph_builder: DependencyGraphBuilder | None = None,
+        metrics_calculator: RepositoryMetricsCalculator | None = None,
+        finding_detector: ArchitectureFindingDetector | None = None,
     ) -> None:
         self.parser = parser or PythonParser()
         self.scanner = scanner or RepositoryScanner()
         self.graph_builder = (
             graph_builder or DependencyGraphBuilder()
         )
+        self.metrics_calculator = (
+            metrics_calculator or RepositoryMetricsCalculator()
+        )
+        self.finding_detector = (
+            finding_detector or ArchitectureFindingDetector()
+        )
 
     def analyze_repository(
         self,
         repository_path: Path,
-    ) -> tuple[
-        list[ParsedModule],
-        DependencyGraph,
-        DependencyGraphAnalyzer,
-    ]:
+    ) -> RepositoryAnalysisResult:
         files = self.scanner.scan(repository_path)
 
         modules: list[ParsedModule] = []
@@ -54,6 +72,13 @@ class PythonAnalysisService:
 
         graph = self.graph_builder.build(modules)
 
-        analyzer = DependencyGraphAnalyzer(graph)
+        metrics = self.metrics_calculator.calculate(graph)
 
-        return modules, graph, analyzer
+        findings = self.finding_detector.detect(graph)
+
+        return RepositoryAnalysisResult(
+            modules=modules,
+            graph=graph,
+            metrics=metrics,
+            findings=findings,
+        )
