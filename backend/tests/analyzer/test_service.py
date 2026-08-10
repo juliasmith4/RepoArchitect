@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from app.analyzer.graph import DependencyType
+from app.analyzer.graph import (
+    DependencyGraphAnalyzer,
+    DependencyType,
+)
 from app.analyzer.service import PythonAnalysisService
 
 
@@ -40,18 +43,18 @@ def get_user():
 
     service = PythonAnalysisService()
 
-    modules, graph, analyzer = (
-        service.analyze_repository(tmp_path)
+    result = service.analyze_repository(
+        tmp_path
     )
 
-    assert len(modules) == 2
+    assert len(result.modules) == 2
 
-    assert graph.has_node("main")
-    assert graph.has_node(
+    assert result.graph.has_node("main")
+    assert result.graph.has_node(
         "services.users"
     )
 
-    dependencies = graph.dependencies_of(
+    dependencies = result.graph.dependencies_of(
         "main"
     )
 
@@ -77,6 +80,22 @@ def get_user():
         == DependencyType.EXTERNAL
     )
 
+    assert result.metrics.module_count == 2
+
+    assert (
+        result.metrics.internal_dependency_count
+        == 1
+    )
+
+    assert (
+        result.metrics.external_dependency_count
+        == 1
+    )
+
+    analyzer = DependencyGraphAnalyzer(
+        result.graph
+    )
+
     users_metrics = analyzer.module_metrics(
         "services.users"
     )
@@ -84,4 +103,9 @@ def get_user():
     assert (
         users_metrics.incoming_dependencies
         == 1
+    )
+
+    assert isinstance(
+        result.findings,
+        list,
     )
