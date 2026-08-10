@@ -18,18 +18,36 @@ analysis_service = PythonAnalysisService()
 def analyze_repository(
     request: AnalysisRequest,
 ) -> AnalysisResponse:
-    repository_path = Path(
-        request.repository_path
-    )
-
     try:
-        result = analysis_service.analyze_repository(
-            repository_path
-        )
+        if request.repository_url:
+            result = (
+                analysis_service.analyze_repository_url(
+                    request.repository_url
+                )
+            )
+
+        elif request.repository_path:
+            result = (
+                analysis_service.analyze_repository(
+                    Path(request.repository_path)
+                )
+            )
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Provide either repository_path "
+                    "or repository_url."
+                ),
+            )
+
     except ValueError as error:
         raise HTTPException(
             status_code=400,
             detail=str(error),
         ) from error
 
-    return AnalysisResponse.from_result(result)
+    return AnalysisResponse.from_result(
+        result
+    )

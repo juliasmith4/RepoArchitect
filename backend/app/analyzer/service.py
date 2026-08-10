@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from app.analyzer.repository.cloner import RepositoryCloner
 
 from app.analyzer.findings import (
     ArchitectureFinding,
@@ -33,12 +34,14 @@ class PythonAnalysisService:
         self,
         parser: PythonParser | None = None,
         scanner: RepositoryScanner | None = None,
+        cloner: RepositoryCloner | None = None,
         graph_builder: DependencyGraphBuilder | None = None,
         metrics_calculator: RepositoryMetricsCalculator | None = None,
         finding_detector: ArchitectureFindingDetector | None = None,
     ) -> None:
         self.parser = parser or PythonParser()
         self.scanner = scanner or RepositoryScanner()
+        self.cloner = cloner or RepositoryCloner()
         self.graph_builder = (
             graph_builder or DependencyGraphBuilder()
         )
@@ -82,3 +85,22 @@ class PythonAnalysisService:
             metrics=metrics,
             findings=findings,
         )
+
+    def analyze_repository_url(
+        self,
+        repository_url: str,
+    ) -> RepositoryAnalysisResult:
+        """Clone and analyze a remote GitHub repository."""
+
+        cloned_repository = self.cloner.clone(
+            repository_url
+        )
+
+        try:
+            return self.analyze_repository(
+                cloned_repository.path
+            )
+        finally:
+            self.cloner.cleanup(
+                cloned_repository.path.parent
+            )

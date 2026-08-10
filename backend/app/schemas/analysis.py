@@ -4,10 +4,9 @@ from app.analyzer.service import (
     RepositoryAnalysisResult,
 )
 
-
 class AnalysisRequest(BaseModel):
-    repository_path: str
-
+    repository_path: str | None = None
+    repository_url: str | None = None
 
 class MetricsResponse(BaseModel):
     module_count: int
