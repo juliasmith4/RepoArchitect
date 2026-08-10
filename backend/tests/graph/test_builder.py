@@ -27,3 +27,21 @@ def test_resolves_parent_package_import() -> None:
     )
 
     assert result == "app.analyzer.graph"
+
+def test_resolves_relative_import_from_package_init() -> None:
+    result = resolve_relative_import(
+        source_module="app.analyzer.graph",
+        imported_module=".analysis",
+        source_is_package=True,
+    )
+
+    assert result == "app.analyzer.graph.analysis"
+
+def test_resolves_parent_relative_import_from_package_init() -> None:
+    result = resolve_relative_import(
+        source_module="app.analyzer.graph",
+        imported_module="..parsing",
+        source_is_package=True,
+    )
+
+    assert result == "app.analyzer.parsing"

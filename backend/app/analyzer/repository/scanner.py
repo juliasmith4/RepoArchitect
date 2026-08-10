@@ -9,13 +9,18 @@ IGNORED_DIRECTORIES = {
     "venv",
     "__pycache__",
     "node_modules",
+    "tests",
+    "test",
 }
 
 
 class RepositoryScanner:
     """Find analyzable Python files inside a repository."""
 
-    def scan(self, repository_path: Path) -> list[Path]:
+    def scan(
+        self,
+        repository_path: Path,
+    ) -> list[Path]:
         if not repository_path.exists():
             raise ValueError(
                 f"Repository does not exist: {repository_path}"
@@ -29,7 +34,10 @@ class RepositoryScanner:
         python_files: list[Path] = []
 
         for file_path in repository_path.rglob("*.py"):
-            if self._should_ignore(file_path, repository_path):
+            if self._should_ignore(
+                file_path,
+                repository_path,
+            ):
                 continue
 
             python_files.append(file_path)
@@ -41,9 +49,20 @@ class RepositoryScanner:
         file_path: Path,
         repository_path: Path,
     ) -> bool:
-        relative_path = file_path.relative_to(repository_path)
+        relative_path = file_path.relative_to(
+            repository_path
+        )
 
-        return any(
+        if any(
             part in IGNORED_DIRECTORIES
             for part in relative_path.parts
-        )
+        ):
+            return True
+
+        if file_path.name.startswith("test_"):
+            return True
+
+        if file_path.name.endswith("_test.py"):
+            return True
+
+        return False

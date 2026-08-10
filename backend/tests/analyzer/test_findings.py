@@ -241,3 +241,24 @@ def test_returns_no_problem_findings_for_simple_connected_graph() -> None:
     findings = detector.detect(graph)
 
     assert findings == []
+
+def test_ignores_isolated_package_init_module() -> None:
+    graph = DependencyGraph()
+
+    graph.add_node(
+        DependencyNode(
+            module_name="app.services",
+            file_path="app/services/__init__.py",
+        )
+    )
+
+    findings = ArchitectureFindingDetector().detect(graph)
+
+    isolated_findings = [
+        finding
+        for finding in findings
+        if finding.finding_type
+        == FindingType.ISOLATED_MODULE
+    ]
+
+    assert isolated_findings == []

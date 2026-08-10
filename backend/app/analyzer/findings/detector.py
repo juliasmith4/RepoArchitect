@@ -70,7 +70,10 @@ class ArchitectureFindingDetector:
         )
 
         findings.extend(
-            self._detect_isolated_modules(analyzer)
+            self._detect_isolated_modules(
+                analyzer=analyzer,
+                graph=graph,
+            )
         )
 
         findings.extend(
@@ -159,21 +162,39 @@ class ArchitectureFindingDetector:
     @staticmethod
     def _detect_isolated_modules(
         analyzer: DependencyGraphAnalyzer,
+        graph: DependencyGraph,
     ) -> list[ArchitectureFinding]:
-        """Detect modules with no incoming or outgoing dependencies."""
+        """
+        Detect isolated modules.
 
-        return [
-            ArchitectureFinding(
-                finding_type=FindingType.ISOLATED_MODULE,
-                severity=FindingSeverity.INFO,
-                message=(
-                    f"{module_name} has no incoming or "
-                    "outgoing module dependencies."
-                ),
-                modules=(module_name,),
+        Empty package __init__.py files are ignored because they are
+        commonly present only to define package structure.
+        """
+
+        findings: list[ArchitectureFinding] = []
+
+        for module_name in analyzer.isolated_modules():
+            node = graph.get_node(module_name)
+
+            if node is None:
+                continue
+
+            if node.file_path.endswith("__init__.py"):
+                continue
+
+            findings.append(
+                ArchitectureFinding(
+                    finding_type=FindingType.ISOLATED_MODULE,
+                    severity=FindingSeverity.INFO,
+                    message=(
+                        f"{module_name} has no incoming or "
+                        "outgoing module dependencies."
+                    ),
+                    modules=(module_name,),
+                )
             )
-            for module_name in analyzer.isolated_modules()
-        ]
+
+        return findings
 
     @staticmethod
     def _detect_unresolved_dependencies(
