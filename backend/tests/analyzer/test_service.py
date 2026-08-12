@@ -5,7 +5,11 @@ from app.analyzer.graph import (
     DependencyType,
 )
 from app.analyzer.service import PythonAnalysisService
+from unittest.mock import MagicMock
 
+from app.analyzer.repository.cloner import (
+    ClonedRepository,
+)
 
 def test_analyzes_repository_end_to_end(
     tmp_path: Path,
@@ -108,4 +112,44 @@ def get_user():
     assert isinstance(
         result.findings,
         list,
+    )
+def test_analyzes_repository_url(
+    tmp_path: Path,
+) -> None:
+    repo_path = tmp_path / "repository"
+    repo_path.mkdir()
+
+    source_file = repo_path / "main.py"
+    source_file.write_text(
+        "import requests",
+        encoding="utf-8",
+    )
+
+    mock_cloner = MagicMock()
+
+    mock_cloner.clone.return_value = (
+        ClonedRepository(
+            path=repo_path,
+            source_url=(
+                "https://github.com/example/project"
+            ),
+        )
+    )
+
+    service = PythonAnalysisService(
+        cloner=mock_cloner
+    )
+
+    result = service.analyze_repository_url(
+        "https://github.com/example/project"
+    )
+
+    assert result.metrics.module_count == 1
+
+    mock_cloner.clone.assert_called_once_with(
+        "https://github.com/example/project"
+    )
+
+    mock_cloner.cleanup.assert_called_once_with(
+        repo_path.parent
     )
